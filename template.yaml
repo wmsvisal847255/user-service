@@ -14,7 +14,7 @@ Parameters:
   AppName:
     Type: String
     Description: Name of the application
-    Default: "congitoUsers"
+    Default: "congito-users"
   ClientDomains:
     Type: CommaDelimitedList
     Description: Array of domains allowed to use this UserPool
