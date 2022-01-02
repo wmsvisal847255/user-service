@@ -121,7 +121,7 @@ Resources:
       Timeout: 5
       Handler: app.lambdaHandler
       Runtime: nodejs12.x
-      CodeUri: src/
+      CodeUri: user-service/
       Events:
         CognitoTrigger:
           Type: Cognito
