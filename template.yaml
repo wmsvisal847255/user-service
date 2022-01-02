@@ -1,9 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-
-Globals:
-  Function:
-    Timeout: 3
+Description: Cognito user pool with hosted domain
 
 Parameters:
   Environment:
@@ -14,99 +11,143 @@ Parameters:
       - staging
       - prod
     Description: Environment of this stack of resources
+  AppName:
+    Type: String
+    Description: Name of the application
+    Default: "congitoUsers"
+  ClientDomains:
+    Type: CommaDelimitedList
+    Description: Array of domains allowed to use this UserPool
+    Default: "http://localhost:8080"
+  AdminEmail:
+    Type: String
+    Description: Email address for administrator
+    Default: "vish847255@gmail.com"
+  AddGroupsToScopes:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+  
+Conditions:
+  ScopeGroups:
+    !Equals [!Ref AddGroupsToScopes, 'true']
 
-Mappings:
-  ResourcesName:
-    dev:
-      tableName: BookingTripDev
-      tableNameArn: BookingTripDevArn
-      arn: iitecomuserpool
-    staging:
-      tableName: BookingTripStaging
-      tableNameArn: BookingTripStagingArn
-      arn: iitecomuserpool
-    prod:
-      tableName: BookingTripProd
-      tableNameArn: BookingTripProdArn
-      arn: iitecomuserpool
+# Mappings:
+#   ResourcesName:
+#     dev:
+#       AppName: congnitoDevUsers
+#       ClientDomains: "http://localhost:8080"
+#       AdminEmail: vish847255@gmail.com
+#       AddGroupsToScopes: true
+#     staging:
+#       AppName: congnitoStagingUsers
+#       ClientDomains: "http://localhost:8080"
+#       AdminEmail: vish847255@gmail.com
+#       AddGroupsToScopes: true
+#     prod:
+#       AppName: congnitoProdUsers
+#       ClientDomains: "http://localhost:8080"
+#       AdminEmail: vish847255@gmail.com
+#       AddGroupsToScopes: true
 
 Resources:
-  BookingApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: !Ref Environment
-      TracingEnabled: true
-      Cors: "'*'"
-      # Auth:
-      #   DefaultAuthorizer: MyCognitoAuthorizer
-      #   Authorizers:
-      #     MyCognitoAuthorizer:
-      #       UserPoolArn: 
-      #         Fn::GetAtt:
-      #           - iitecomuserpool-UserPool
-      #           - Arn
-              # Fn::ImportValue: !FindInMap [ResourcesName, !Ref Environment, arn]
+  UserPool:
+    Type: AWS::Cognito::UserPool 
+    Properties: 
+      UserPoolName: !Sub ${AppName}-UserPool-${Environment} 
+      Policies: 
+        PasswordPolicy: 
+          MinimumLength: 8
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes: 
+        - email
+      Schema: 
+        - AttributeDataType: String 
+          Name: email 
+          Required: false
 
-  BookingTrip:
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient 
+    Properties: 
+      UserPoolId: !Ref UserPool 
+      ClientName: !Sub ${AppName}-UserPoolClient-${Environment}  
+      GenerateSecret: false # set to false for web clients
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs: !Ref ClientDomains
+      LogoutURLs: !Ref ClientDomains
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit #for testing with postman
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties: 
+      Domain: !Sub ${AppName}-${AWS::AccountId}-${Environment} 
+      UserPoolId: !Ref UserPool
+
+  AdminUserGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties: 
+      GroupName: Admins
+      Description: Admin user group
+      Precedence: 0
+      UserPoolId: !Ref UserPool
+
+  AdminUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      Username: !Ref AdminEmail
+      DesiredDeliveryMediums: 
+        - EMAIL
+      ForceAliasCreation: true
+      UserAttributes: 
+        - Name: email
+          Value: !Ref AdminEmail
+      UserPoolId: !Ref UserPool
+
+  TriggerFunction:
     Type: AWS::Serverless::Function
+    Condition: ScopeGroups
     Properties:
-      Handler: app.bookingTripHandler
+      Timeout: 5
+      Handler: app.lambdaHandler
       Runtime: nodejs12.x
-      CodeUri: booking/
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !FindInMap [ResourcesName, !Ref Environment, tableName]
-      Environment:
-        Variables:
-          TABLE_NAME: !FindInMap [ResourcesName, !Ref Environment, tableName]
+      CodeUri: src/
       Events:
-        CreateBookingAPI:
-          Type: Api
+        CognitoTrigger:
+          Type: Cognito
           Properties:
-            Path: /booking
-            Method: POST
-            RestApiId: !Ref BookingApi
-        UpdateBookingAPI:
-          Type: Api
-          Properties:
-            Path: /booking/{bookingId}
-            Method: ANY
-            RestApiId: !Ref BookingApi
+            Trigger: PreTokenGeneration
+            UserPool: !Ref UserPool
+    
 
-  BookingTripTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !FindInMap [ResourcesName, !Ref Environment, tableName]
-      AttributeDefinitions:
-        - AttributeName: bookingId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: bookingId
-          KeyType: HASH
-      BillingMode: PAY_PER_REQUEST
-      StreamSpecification:
-          StreamViewType: NEW_IMAGE
-
+  AddUserToGroup:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties: 
+      GroupName: !Ref AdminUserGroup
+      Username: !Ref AdminUser
+      UserPoolId: !Ref UserPool
+    
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  BookingTripApi:
-    Description: "API Gateway endpoint URL for ${Environment} stage for Booking Trip function"
-    Value: !Sub "https://${BookingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/booking/"
-  BookingTrip:
-    Description: "Booking Trip Lambda Function ARN"
-    Value: !GetAtt BookingTrip.Arn
-  BookingTripTable:
-    Description: "Booking Trip Dynamo DB Table"
-    Value: !FindInMap [ResourcesName, !Ref Environment, tableName]
-    Export: 
-      Name: !FindInMap [ResourcesName, !Ref Environment, tableName]
-  BookingTripTableStream:
-    Description: "Booking Trip Dynamo DB Table Stream"
-    Value: !GetAtt BookingTripTable.StreamArn
-    Export: 
-      Name: !FindInMap [ResourcesName, !Ref Environment, tableNameArn]
-  BookingTripIamRole:
-    Description: "Implicit IAM Role created for Booking Trip function"
-    Value: !GetAtt BookingTripRole.Arn
+    UserPoolId:
+      Description: "User pool ID"
+      Value: !Ref UserPool
+      Export:
+        Name: !Sub ${AppName}:UserPoolId-${Environment} 
+
+    UserPoolClientId:
+      Description: "Application client ID"
+      Value: !Ref UserPoolClient
+
+    AuthUrl:
+      Description: "URL used for authentication"
+      Value: !Sub https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com
