@@ -118,6 +118,7 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: ScopeGroups
     Properties:
+      FunctionName: post-authentication
       Timeout: 5
       Handler: app.lambdaHandler
       Runtime: nodejs12.x
