@@ -29,6 +29,14 @@ Parameters:
       - 'true'
       - 'false'
     Default: 'true'
+
+DomainName:
+  dev:
+    arn: UserPoolArnDev
+  staging:
+    arn: UserPoolArnStaging
+  prod:
+    arn: UserPoolArnProd
   
 Conditions:
   ScopeGroups:
@@ -139,6 +147,12 @@ Resources:
       UserPoolId: !Ref UserPool
     
 Outputs:
+    UserpoolArm:
+      Description: "User pool arn"
+      Value: !GetAtt UserPool.Arn
+      Export:
+        Name: !FindInMap [DomainName, !Ref Environment, arn]
+        
     UserPoolId:
       Description: "User pool ID"
       Value: !Ref UserPool
